@@ -8,17 +8,13 @@ jobs:
   publish:
     name: Publish to RubyGems
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v6
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.3'
-      - run: ruby -Ilib -Itest -e "Dir['test/test_*.rb'].each { |f| require_relative f }"
-      - name: Build and publish gem
-        run: |
-          mkdir -p ~/.gem
-          echo "---" > ~/.gem/credentials
-          echo ":rubygems_api_key: ${{ secrets.RUBYGEMS_API_KEY }}" >> ~/.gem/credentials
-          chmod 0600 ~/.gem/credentials
-          gem build cyphera-kmip.gemspec
-          gem push cyphera-kmip-*.gem
+          ruby-version: ruby
+          bundler-cache: true
+      - uses: rubygems/release-gem@v1
