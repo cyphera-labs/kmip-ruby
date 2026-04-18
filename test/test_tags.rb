@@ -72,7 +72,7 @@ class TestTags < Minitest::Test
   end
 
   def test_operation_check
-    assert_equal 0x0000001C, Operation::CHECK
+    assert_equal 0x00000009, Operation::CHECK
   end
 
   def test_operation_no_duplicate_values

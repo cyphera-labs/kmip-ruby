@@ -60,7 +60,7 @@ module CypheraKmip
     LOCATE   = 0x00000008
     ACTIVATE = 0x00000012
     DESTROY  = 0x00000014
-    CHECK    = 0x0000001C
+    CHECK    = 0x00000009
   end
 
   module ObjectType
