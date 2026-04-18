@@ -3,7 +3,8 @@
 Gem::Specification.new do |spec|
   spec.name          = "cyphera-kmip"
   spec.version       = "0.1.0"
-  spec.authors       = ["Horizon Digital Engineering LLC"]
+  spec.authors       = ["Leslie Gutschow"]
+  spec.email         = ["leslie.gutschow@horizondigital.dev"]
   spec.summary       = "KMIP client for Ruby"
   spec.description   = "KMIP client for Ruby — connect to any KMIP-compliant key management server (Thales, IBM SKLM, Entrust, Fortanix, HashiCorp Vault)."
   spec.homepage      = "https://github.com/cyphera-labs/kmip-ruby"
