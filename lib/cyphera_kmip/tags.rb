@@ -52,15 +52,72 @@ module CypheraKmip
 
     # Template
     TEMPLATE_ATTRIBUTE = 0x420091
+
+    # Key pair
+    PRIVATE_KEY_UNIQUE_IDENTIFIER = 0x420066
+    PUBLIC_KEY_UNIQUE_IDENTIFIER  = 0x42006F
+    PUBLIC_KEY                    = 0x42004E
+    PRIVATE_KEY                   = 0x42004D
+
+    # Certificate
+    CERTIFICATE       = 0x420021
+    CERTIFICATE_TYPE  = 0x42001D
+    CERTIFICATE_VALUE = 0x42001E
+
+    # Crypto operations
+    DATA               = 0x420033
+    IV_COUNTER_NONCE   = 0x420047
+    SIGNATURE_DATA     = 0x42004F
+    MAC_DATA           = 0x420051
+    VALIDITY_INDICATOR = 0x420098
+
+    # Revocation
+    REVOCATION_REASON      = 0x420082
+    REVOCATION_REASON_CODE = 0x420083
+
+    # Query
+    QUERY_FUNCTION = 0x420074
+
+    # State
+    STATE = 0x42008D
+
+    # Derivation
+    DERIVATION_METHOD     = 0x420031
+    DERIVATION_PARAMETERS = 0x420032
+    DERIVATION_DATA       = 0x420030
+
+    # Lease
+    LEASE_TIME = 0x420049
   end
 
   module Operation
-    CREATE   = 0x00000001
-    GET      = 0x0000000A
-    LOCATE   = 0x00000008
-    ACTIVATE = 0x00000012
-    DESTROY  = 0x00000014
-    CHECK    = 0x00000009
+    CREATE             = 0x00000001
+    CREATE_KEY_PAIR    = 0x00000002
+    REGISTER           = 0x00000003
+    RE_KEY             = 0x00000004
+    DERIVE_KEY         = 0x00000005
+    LOCATE             = 0x00000008
+    CHECK              = 0x00000009
+    GET                = 0x0000000A
+    GET_ATTRIBUTES     = 0x0000000B
+    GET_ATTRIBUTE_LIST = 0x0000000C
+    ADD_ATTRIBUTE      = 0x0000000D
+    MODIFY_ATTRIBUTE   = 0x0000000E
+    DELETE_ATTRIBUTE   = 0x0000000F
+    OBTAIN_LEASE       = 0x00000010
+    ACTIVATE           = 0x00000012
+    REVOKE             = 0x00000013
+    DESTROY            = 0x00000014
+    ARCHIVE            = 0x00000015
+    RECOVER            = 0x00000016
+    QUERY              = 0x00000018
+    POLL               = 0x0000001A
+    DISCOVER_VERSIONS  = 0x0000001E
+    ENCRYPT            = 0x0000001F
+    DECRYPT            = 0x00000020
+    SIGN               = 0x00000021
+    SIGNATURE_VERIFY   = 0x00000022
+    MAC                = 0x00000023
   end
 
   module ObjectType

@@ -6,6 +6,8 @@ require "openssl"
 module CypheraKmip
   # KMIP client -- connects to any KMIP 1.4 server via mTLS.
   #
+  # Supports all 27 KMIP 1.4 operations.
+  #
   # Usage:
   #   client = CypheraKmip::Client.new(
   #     host: "kmip-server.corp.internal",
@@ -15,10 +17,22 @@ module CypheraKmip
   #   )
   #
   #   key = client.fetch_key("my-key-name")
-  #   # key is a binary string of raw key bytes
-  #
   #   client.close
   class Client
+    ALGO_MAP = {
+      "AES" => Algorithm::AES,
+      "DES" => Algorithm::DES,
+      "TRIPLEDES" => Algorithm::TRIPLE_DES,
+      "3DES" => Algorithm::TRIPLE_DES,
+      "RSA" => Algorithm::RSA,
+      "DSA" => Algorithm::DSA,
+      "ECDSA" => Algorithm::ECDSA,
+      "HMACSHA1" => Algorithm::HMAC_SHA1,
+      "HMACSHA256" => Algorithm::HMAC_SHA256,
+      "HMACSHA384" => Algorithm::HMAC_SHA384,
+      "HMACSHA512" => Algorithm::HMAC_SHA512,
+    }.freeze
+
     # @param host [String] KMIP server hostname
     # @param client_cert [String] path to client certificate PEM file
     # @param client_key [String] path to client private key PEM file
@@ -35,44 +49,23 @@ module CypheraKmip
       @socket = nil
     end
 
-    # Locate keys by name.
-    #
-    # @param name [String] key name to search for
-    # @return [Array<String>] array of unique identifiers
-    def locate(name)
-      request = Operations.build_locate_request(name)
-      response_data = send_request(request)
-      response = Operations.parse_response(response_data)
-      Operations.parse_locate_payload(response[:payload])[:unique_identifiers]
+    # Resolve an algorithm name string to its KMIP enum value.
+    # Returns 0 for unknown algorithms.
+    def self.resolve_algorithm(name)
+      ALGO_MAP[name.to_s.upcase] || 0
     end
 
-    # Get key material by unique ID.
-    #
-    # @param unique_id [String] the unique identifier of the key
-    # @return [Hash] with keys: :object_type, :unique_identifier, :key_material
-    def get(unique_id)
-      request = Operations.build_get_request(unique_id)
-      response_data = send_request(request)
-      response = Operations.parse_response(response_data)
-      Operations.parse_get_payload(response[:payload])
-    end
+    # -------------------------------------------------------------------------
+    # 1. Create -- create a new symmetric key on the server.
+    # -------------------------------------------------------------------------
 
-    # Create a new symmetric key on the server.
-    #
-    # @param name [String] key name
-    # @param algorithm [String, nil] algorithm name (e.g., "AES")
-    # @param length [Integer] key length in bits (default 256)
-    # @return [Hash] with keys: :object_type, :unique_identifier
     def create(name, algorithm = nil, length = 256)
-      algo_map = {
-        "AES" => Algorithm::AES,
-        "DES" => Algorithm::DES,
-        "TripleDES" => Algorithm::TRIPLE_DES,
-        "RSA" => Algorithm::RSA,
-      }
       algo_enum = Algorithm::AES
-      if algorithm
-        algo_enum = algo_map[algorithm] || algo_map[algorithm.upcase] || Algorithm::AES
+      if algorithm.is_a?(String)
+        algo_enum = self.class.resolve_algorithm(algorithm)
+        algo_enum = Algorithm::AES if algo_enum.zero?
+      elsif algorithm.is_a?(Integer)
+        algo_enum = algorithm
       end
 
       request = Operations.build_create_request(name, algo_enum, length)
@@ -81,7 +74,305 @@ module CypheraKmip
       Operations.parse_create_payload(response[:payload])
     end
 
-    # Convenience: locate by name + get material in one call.
+    # -------------------------------------------------------------------------
+    # 2. CreateKeyPair -- create a new asymmetric key pair.
+    # -------------------------------------------------------------------------
+
+    def create_key_pair(name, algorithm, length)
+      algo_enum = algorithm.is_a?(String) ? self.class.resolve_algorithm(algorithm) : algorithm
+      request = Operations.build_create_key_pair_request(name, algo_enum, length)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_create_key_pair_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 3. Register -- register existing key material on the server.
+    # -------------------------------------------------------------------------
+
+    def register(object_type, material, name, algorithm, length)
+      algo_enum = algorithm.is_a?(String) ? self.class.resolve_algorithm(algorithm) : algorithm
+      request = Operations.build_register_request(object_type, material, name, algo_enum, length)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_create_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 4. ReKey -- re-key an existing key.
+    # -------------------------------------------------------------------------
+
+    def re_key(unique_id)
+      request = Operations.build_re_key_request(unique_id)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_re_key_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 5. DeriveKey -- derive a new key from an existing key.
+    # -------------------------------------------------------------------------
+
+    def derive_key(unique_id, derivation_data, name, length)
+      request = Operations.build_derive_key_request(unique_id, derivation_data, name, length)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_derive_key_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 6. Locate -- find keys by name.
+    # -------------------------------------------------------------------------
+
+    def locate(name)
+      request = Operations.build_locate_request(name)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_locate_payload(response[:payload])[:unique_identifiers]
+    end
+
+    # -------------------------------------------------------------------------
+    # 7. Check -- check the status of a managed object.
+    # -------------------------------------------------------------------------
+
+    def check(unique_id)
+      request = Operations.build_check_request(unique_id)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_check_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 8. Get -- fetch key material by unique ID.
+    # -------------------------------------------------------------------------
+
+    def get(unique_id)
+      request = Operations.build_get_request(unique_id)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_get_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 9. GetAttributes -- fetch all attributes of a managed object.
+    # -------------------------------------------------------------------------
+
+    def get_attributes(unique_id)
+      request = Operations.build_get_attributes_request(unique_id)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_get_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 10. GetAttributeList -- fetch the list of attribute names.
+    # -------------------------------------------------------------------------
+
+    def get_attribute_list(unique_id)
+      request = Operations.build_get_attribute_list_request(unique_id)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      return [] if response[:payload].nil?
+
+      attrs = Ttlv.find_children(response[:payload], Tag::ATTRIBUTE_NAME)
+      attrs.map { |a| a[:value] }
+    end
+
+    # -------------------------------------------------------------------------
+    # 11. AddAttribute -- add an attribute to a managed object.
+    # -------------------------------------------------------------------------
+
+    def add_attribute(unique_id, name, value)
+      request = Operations.build_add_attribute_request(unique_id, name, value)
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 12. ModifyAttribute -- modify an attribute of a managed object.
+    # -------------------------------------------------------------------------
+
+    def modify_attribute(unique_id, name, value)
+      request = Operations.build_modify_attribute_request(unique_id, name, value)
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 13. DeleteAttribute -- delete an attribute from a managed object.
+    # -------------------------------------------------------------------------
+
+    def delete_attribute(unique_id, name)
+      request = Operations.build_delete_attribute_request(unique_id, name)
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 14. ObtainLease -- obtain a lease for a managed object.
+    # -------------------------------------------------------------------------
+
+    def obtain_lease(unique_id)
+      request = Operations.build_obtain_lease_request(unique_id)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      return 0 if response[:payload].nil?
+
+      lease = Ttlv.find_child(response[:payload], Tag::LEASE_TIME)
+      lease ? lease[:value] : 0
+    end
+
+    # -------------------------------------------------------------------------
+    # 15. Activate -- set a key's state to Active.
+    # -------------------------------------------------------------------------
+
+    def activate(unique_id)
+      request = Operations.build_activate_request(unique_id)
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 16. Revoke -- revoke a managed object with a reason code.
+    # -------------------------------------------------------------------------
+
+    def revoke(unique_id, reason)
+      request = Operations.build_revoke_request(unique_id, reason)
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 17. Destroy -- destroy a key by unique ID.
+    # -------------------------------------------------------------------------
+
+    def destroy(unique_id)
+      request = Operations.build_destroy_request(unique_id)
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 18. Archive -- archive a managed object.
+    # -------------------------------------------------------------------------
+
+    def archive(unique_id)
+      request = Operations.build_archive_request(unique_id)
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 19. Recover -- recover an archived managed object.
+    # -------------------------------------------------------------------------
+
+    def recover(unique_id)
+      request = Operations.build_recover_request(unique_id)
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 20. Query -- query the server for supported operations and object types.
+    # -------------------------------------------------------------------------
+
+    def query
+      request = Operations.build_query_request
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_query_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 21. Poll -- poll the server.
+    # -------------------------------------------------------------------------
+
+    def poll
+      request = Operations.build_poll_request
+      response_data = send_request(request)
+      Operations.parse_response(response_data)
+      nil
+    end
+
+    # -------------------------------------------------------------------------
+    # 22. DiscoverVersions -- discover supported KMIP versions.
+    # -------------------------------------------------------------------------
+
+    def discover_versions
+      request = Operations.build_discover_versions_request
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_discover_versions_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 23. Encrypt -- encrypt data using a managed key.
+    # -------------------------------------------------------------------------
+
+    def encrypt(unique_id, data)
+      request = Operations.build_encrypt_request(unique_id, data)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_encrypt_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 24. Decrypt -- decrypt data using a managed key.
+    # -------------------------------------------------------------------------
+
+    def decrypt(unique_id, data, nonce = nil)
+      request = Operations.build_decrypt_request(unique_id, data, nonce)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_decrypt_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 25. Sign -- sign data using a managed key.
+    # -------------------------------------------------------------------------
+
+    def sign(unique_id, data)
+      request = Operations.build_sign_request(unique_id, data)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_sign_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 26. SignatureVerify -- verify a signature using a managed key.
+    # -------------------------------------------------------------------------
+
+    def signature_verify(unique_id, data, signature)
+      request = Operations.build_signature_verify_request(unique_id, data, signature)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_signature_verify_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # 27. MAC -- compute a MAC using a managed key.
+    # -------------------------------------------------------------------------
+
+    def mac(unique_id, data)
+      request = Operations.build_mac_request(unique_id, data)
+      response_data = send_request(request)
+      response = Operations.parse_response(response_data)
+      Operations.parse_mac_payload(response[:payload])
+    end
+
+    # -------------------------------------------------------------------------
+    # Convenience methods
+    # -------------------------------------------------------------------------
+
+    # Locate by name + get material in one call.
     #
     # @param name [String] key name
     # @return [String] raw key bytes (binary string)

@@ -55,24 +55,112 @@ class TestTags < Minitest::Test
     assert_equal 0x00000001, Operation::CREATE
   end
 
+  def test_operation_create_key_pair
+    assert_equal 0x00000002, Operation::CREATE_KEY_PAIR
+  end
+
+  def test_operation_register
+    assert_equal 0x00000003, Operation::REGISTER
+  end
+
+  def test_operation_re_key
+    assert_equal 0x00000004, Operation::RE_KEY
+  end
+
+  def test_operation_derive_key
+    assert_equal 0x00000005, Operation::DERIVE_KEY
+  end
+
   def test_operation_locate
     assert_equal 0x00000008, Operation::LOCATE
+  end
+
+  def test_operation_check
+    assert_equal 0x00000009, Operation::CHECK
   end
 
   def test_operation_get
     assert_equal 0x0000000A, Operation::GET
   end
 
+  def test_operation_get_attributes
+    assert_equal 0x0000000B, Operation::GET_ATTRIBUTES
+  end
+
+  def test_operation_get_attribute_list
+    assert_equal 0x0000000C, Operation::GET_ATTRIBUTE_LIST
+  end
+
+  def test_operation_add_attribute
+    assert_equal 0x0000000D, Operation::ADD_ATTRIBUTE
+  end
+
+  def test_operation_modify_attribute
+    assert_equal 0x0000000E, Operation::MODIFY_ATTRIBUTE
+  end
+
+  def test_operation_delete_attribute
+    assert_equal 0x0000000F, Operation::DELETE_ATTRIBUTE
+  end
+
+  def test_operation_obtain_lease
+    assert_equal 0x00000010, Operation::OBTAIN_LEASE
+  end
+
   def test_operation_activate
     assert_equal 0x00000012, Operation::ACTIVATE
+  end
+
+  def test_operation_revoke
+    assert_equal 0x00000013, Operation::REVOKE
   end
 
   def test_operation_destroy
     assert_equal 0x00000014, Operation::DESTROY
   end
 
-  def test_operation_check
-    assert_equal 0x00000009, Operation::CHECK
+  def test_operation_archive
+    assert_equal 0x00000015, Operation::ARCHIVE
+  end
+
+  def test_operation_recover
+    assert_equal 0x00000016, Operation::RECOVER
+  end
+
+  def test_operation_query
+    assert_equal 0x00000018, Operation::QUERY
+  end
+
+  def test_operation_poll
+    assert_equal 0x0000001A, Operation::POLL
+  end
+
+  def test_operation_discover_versions
+    assert_equal 0x0000001E, Operation::DISCOVER_VERSIONS
+  end
+
+  def test_operation_encrypt
+    assert_equal 0x0000001F, Operation::ENCRYPT
+  end
+
+  def test_operation_decrypt
+    assert_equal 0x00000020, Operation::DECRYPT
+  end
+
+  def test_operation_sign
+    assert_equal 0x00000021, Operation::SIGN
+  end
+
+  def test_operation_signature_verify
+    assert_equal 0x00000022, Operation::SIGNATURE_VERIFY
+  end
+
+  def test_operation_mac
+    assert_equal 0x00000023, Operation::MAC
+  end
+
+  def test_operation_count_is_27
+    assert_equal 27, Operation.constants.size
   end
 
   def test_operation_no_duplicate_values
