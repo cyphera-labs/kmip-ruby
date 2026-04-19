@@ -33,19 +33,24 @@ module CypheraKmip
       "HMACSHA512" => Algorithm::HMAC_SHA512,
     }.freeze
 
+    # Maximum KMIP response size (16MB).
+    MAX_RESPONSE_SIZE = 16 * 1024 * 1024
+
     # @param host [String] KMIP server hostname
     # @param client_cert [String] path to client certificate PEM file
     # @param client_key [String] path to client private key PEM file
     # @param port [Integer] KMIP server port (default 5696)
     # @param ca_cert [String, nil] path to CA certificate PEM file
     # @param timeout [Integer] connection timeout in seconds (default 10)
-    def initialize(host:, client_cert:, client_key:, port: 5696, ca_cert: nil, timeout: 10)
+    # @param insecure_skip_verify [Boolean] DANGER: disables server certificate verification (default false)
+    def initialize(host:, client_cert:, client_key:, port: 5696, ca_cert: nil, timeout: 10, insecure_skip_verify: false)
       @host = host
       @port = port
       @timeout = timeout
       @client_cert = client_cert
       @client_key = client_key
       @ca_cert = ca_cert
+      @insecure_skip_verify = insecure_skip_verify
       @socket = nil
     end
 
@@ -400,12 +405,36 @@ module CypheraKmip
 
     def send_request(request)
       socket = connect
-      socket.write(request)
+      begin
+        socket.write(request)
+      rescue IOError, SystemCallError
+        @socket = nil # Mark connection as stale.
+        raise
+      end
 
       # Read TTLV header (8 bytes) to determine total length
-      header = recv_exact(socket, 8)
+      begin
+        header = recv_exact(socket, 8)
+      rescue IOError, SystemCallError
+        @socket = nil # Mark connection as stale.
+        raise
+      end
+
       value_length = header.byteslice(4, 4).unpack1("N")
-      body = recv_exact(socket, value_length)
+
+      # Validate response size before allocating.
+      if value_length > MAX_RESPONSE_SIZE
+        @socket = nil # Mark connection as stale.
+        raise "KMIP: response too large (#{value_length} bytes, max #{MAX_RESPONSE_SIZE})"
+      end
+
+      begin
+        body = recv_exact(socket, value_length)
+      rescue IOError, SystemCallError
+        @socket = nil # Mark connection as stale.
+        raise
+      end
+
       header + body
     end
 
@@ -432,9 +461,18 @@ module CypheraKmip
 
       if @ca_cert
         ctx.ca_file = @ca_cert
-        ctx.verify_mode = OpenSSL::SSL::VERIFY_PEER
       else
+        # Use system default certificate store when no CA cert is provided.
+        ctx.cert_store = OpenSSL::X509::Store.new
+        ctx.cert_store.set_default_paths
+      end
+
+      # Always verify peer certificates by default.
+      # Only disable if explicitly opted in via insecure_skip_verify.
+      if @insecure_skip_verify
         ctx.verify_mode = OpenSSL::SSL::VERIFY_NONE
+      else
+        ctx.verify_mode = OpenSSL::SSL::VERIFY_PEER
       end
 
       ssl = OpenSSL::SSL::SSLSocket.new(tcp, ctx)

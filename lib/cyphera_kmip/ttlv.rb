@@ -90,12 +90,17 @@ module CypheraKmip
       encode(tag, TYPE_DATE_TIME, [value >> 32, value & 0xFFFFFFFF].pack("NN"))
     end
 
+    # Maximum nesting depth for TTLV structures.
+    MAX_DECODE_DEPTH = 32
+
     # Decode a TTLV buffer into a parsed tree.
     #
     # @param buf [String] raw TTLV bytes (binary string)
     # @param offset [Integer] starting offset
+    # @param depth [Integer] current recursion depth (internal)
     # @return [Hash] with keys: :tag, :type, :value, :length, :total_length
-    def decode(buf, offset = 0)
+    def decode(buf, offset = 0, depth = 0)
+      raise "TTLV: maximum nesting depth exceeded" if depth > MAX_DECODE_DEPTH
       raise "TTLV buffer too short for header" if buf.bytesize - offset < 8
 
       bytes = buf.byteslice(offset, 8).unpack("C4N")
@@ -106,13 +111,18 @@ module CypheraKmip
       total_length = 8 + padded
       value_start = offset + 8
 
+      # Bounds check: ensure declared length fits within buffer.
+      if value_start + padded > buf.bytesize
+        raise "TTLV: declared length #{length} exceeds buffer (have #{buf.bytesize - value_start} bytes)"
+      end
+
       value = case type
               when TYPE_STRUCTURE
                 children = []
                 pos = value_start
                 end_pos = value_start + length
                 while pos < end_pos
-                  child = decode(buf, pos)
+                  child = decode(buf, pos, depth + 1)
                   children << child
                   pos += child[:total_length]
                 end
