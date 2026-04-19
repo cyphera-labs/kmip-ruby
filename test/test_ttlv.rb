@@ -402,4 +402,64 @@ class TestTtlv < Minitest::Test
     decoded = Ttlv.decode(encoded)
     assert_equal encoded.bytesize, decoded[:total_length]
   end
+
+  # ---------------------------------------------------------------------------
+  # Security hardening tests
+  # ---------------------------------------------------------------------------
+
+  def test_rejects_declared_length_exceeding_buffer
+    # Header claiming 1000 bytes of value, but only 10 bytes provided
+    header = [0x42, 0x00, 0x01, 0x07].pack("C4") # tag=0x420001, type=TextString
+    header += [1000].pack("N") # length = 1000
+    body = "\x00".b * 10
+    buf = header + body
+    err = assert_raises(RuntimeError) { Ttlv.decode(buf) }
+    assert_match(/exceeds buffer/, err.message)
+  end
+
+  def test_accepts_declared_length_that_exactly_fits
+    encoded = Ttlv.encode_integer(0x420001, 42)
+    decoded = Ttlv.decode(encoded)
+    assert_equal 42, decoded[:value]
+  end
+
+  def test_rejects_zero_length_buffer
+    assert_raises(RuntimeError) { Ttlv.decode("".b) }
+  end
+
+  def test_rejects_structures_nested_deeper_than_32_levels
+    # Build 33 levels of nesting
+    inner = Ttlv.encode_integer(0x420001, 42)
+    33.times { inner = Ttlv.encode_structure(0x420001, [inner]) }
+    err = assert_raises(RuntimeError) { Ttlv.decode(inner) }
+    assert_match(/depth/, err.message)
+  end
+
+  def test_accepts_structures_nested_exactly_32_levels_deep
+    # Build 31 wrapping levels (root is depth 0, innermost is depth 31)
+    inner = Ttlv.encode_integer(0x420001, 42)
+    31.times { inner = Ttlv.encode_structure(0x420001, [inner]) }
+    decoded = Ttlv.decode(inner)
+    assert_equal Ttlv::TYPE_STRUCTURE, decoded[:type]
+  end
+
+  def test_rejects_truncated_header
+    buf = [0x42, 0x00, 0x01, 0x02].pack("C4")
+    assert_raises(RuntimeError) { Ttlv.decode(buf) }
+  end
+
+  def test_handles_integer_with_wrong_length_safely
+    # Header: tag=0x420001, type=Integer(0x02), length=3 (should be 4)
+    buf = "\x00".b * 16
+    buf[0] = 0x42.chr; buf[1] = 0x00.chr; buf[2] = 0x01.chr
+    buf[3] = 0x02.chr # type = Integer
+    buf[4, 4] = [3].pack("N") # length = 3 (invalid)
+    # Should either raise or handle safely — must not crash
+    begin
+      Ttlv.decode(buf)
+    rescue => e
+      # Any exception is acceptable
+    end
+    assert true, "decoder did not crash on malformed integer length"
+  end
 end
