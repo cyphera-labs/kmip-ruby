@@ -225,16 +225,24 @@ class TestTags < Minitest::Test
     assert_equal 0x00000007, Algorithm::HMAC_SHA1
   end
 
+  def test_algorithm_hmac_sha224
+    assert_equal 0x00000008, Algorithm::HMAC_SHA224
+  end
+
   def test_algorithm_hmac_sha256
-    assert_equal 0x00000008, Algorithm::HMAC_SHA256
+    assert_equal 0x00000009, Algorithm::HMAC_SHA256
   end
 
   def test_algorithm_hmac_sha384
-    assert_equal 0x00000009, Algorithm::HMAC_SHA384
+    assert_equal 0x0000000A, Algorithm::HMAC_SHA384
   end
 
   def test_algorithm_hmac_sha512
-    assert_equal 0x0000000A, Algorithm::HMAC_SHA512
+    assert_equal 0x0000000B, Algorithm::HMAC_SHA512
+  end
+
+  def test_algorithm_hmac_md5
+    assert_equal 0x0000000C, Algorithm::HMAC_MD5
   end
 
   def test_algorithm_no_duplicate_values
@@ -323,8 +331,16 @@ class TestTags < Minitest::Test
     assert_equal 0x00000040, UsageMask::EXPORT
   end
 
+  def test_usage_mask_mac_generate
+    assert_equal 0x00000080, UsageMask::MAC_GENERATE
+  end
+
+  def test_usage_mask_mac_verify
+    assert_equal 0x00000100, UsageMask::MAC_VERIFY
+  end
+
   def test_usage_mask_derive_key
-    assert_equal 0x00000100, UsageMask::DERIVE_KEY
+    assert_equal 0x00000200, UsageMask::DERIVE_KEY
   end
 
   def test_usage_mask_key_agreement
