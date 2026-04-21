@@ -61,7 +61,7 @@ module CypheraKmip
 
     # Encode a 64-bit long integer.
     def encode_long_integer(tag, value)
-      encode(tag, TYPE_LONG_INTEGER, [value >> 32, value & 0xFFFFFFFF].pack("NN"))
+      encode(tag, TYPE_LONG_INTEGER, [(value >> 32) & 0xFFFFFFFF, value & 0xFFFFFFFF].pack("NN"))
     end
 
     # Encode an enumeration (32-bit unsigned).
@@ -125,29 +125,42 @@ module CypheraKmip
                   child = decode(buf, pos, depth + 1)
                   children << child
                   pos += child[:total_length]
+                  if pos > end_pos
+                    raise "TTLV: structure child overruns parent boundary at offset #{pos}"
+                  end
                 end
                 children
               when TYPE_INTEGER
+                raise "TTLV: Integer requires length 4, got #{length}" unless length == 4
                 raw = buf.byteslice(value_start, 4).unpack1("N")
                 raw >= 0x80000000 ? raw - 0x100000000 : raw
               when TYPE_LONG_INTEGER
+                raise "TTLV: LongInteger requires length 8, got #{length}" unless length == 8
                 hi, lo = buf.byteslice(value_start, 8).unpack("NN")
                 val = (hi << 32) | lo
                 val >= (1 << 63) ? val - (1 << 64) : val
               when TYPE_ENUMERATION
+                raise "TTLV: Enumeration requires length 4, got #{length}" unless length == 4
                 buf.byteslice(value_start, 4).unpack1("N")
               when TYPE_BOOLEAN
+                raise "TTLV: Boolean requires length 8, got #{length}" unless length == 8
                 hi, lo = buf.byteslice(value_start, 8).unpack("NN")
                 ((hi << 32) | lo) != 0
               when TYPE_TEXT_STRING
-                buf.byteslice(value_start, length).force_encoding("UTF-8")
+                raw = buf.byteslice(value_start, length).force_encoding("UTF-8")
+                unless length.zero? || raw.valid_encoding?
+                  raise "TTLV: invalid UTF-8 in TextString at offset #{value_start}"
+                end
+                raw
               when TYPE_BYTE_STRING
                 buf.byteslice(value_start, length)
               when TYPE_DATE_TIME
+                raise "TTLV: DateTime requires length 8, got #{length}" unless length == 8
                 hi, lo = buf.byteslice(value_start, 8).unpack("NN")
                 val = (hi << 32) | lo
                 val >= (1 << 63) ? val - (1 << 64) : val
               when TYPE_INTERVAL
+                raise "TTLV: Interval requires length 4, got #{length}" unless length == 4
                 buf.byteslice(value_start, 4).unpack1("N")
               else
                 buf.byteslice(value_start, length)

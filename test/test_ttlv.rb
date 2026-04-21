@@ -448,18 +448,93 @@ class TestTtlv < Minitest::Test
     assert_raises(RuntimeError) { Ttlv.decode(buf) }
   end
 
-  def test_handles_integer_with_wrong_length_safely
-    # Header: tag=0x420001, type=Integer(0x02), length=3 (should be 4)
+  def test_integer_with_wrong_length_raises
     buf = "\x00".b * 16
     buf[0] = 0x42.chr; buf[1] = 0x00.chr; buf[2] = 0x01.chr
     buf[3] = 0x02.chr # type = Integer
     buf[4, 4] = [3].pack("N") # length = 3 (invalid)
-    # Should either raise or handle safely — must not crash
-    begin
-      Ttlv.decode(buf)
-    rescue => e
-      # Any exception is acceptable
-    end
-    assert true, "decoder did not crash on malformed integer length"
+    err = assert_raises(RuntimeError) { Ttlv.decode(buf) }
+    assert_match(/Integer requires length 4/, err.message)
+  end
+
+  def test_enumeration_with_wrong_length_raises
+    buf = "\x00".b * 16
+    buf[0] = 0x42.chr; buf[1] = 0x00.chr; buf[2] = 0x01.chr
+    buf[3] = 0x05.chr # type = Enumeration
+    buf[4, 4] = [2].pack("N") # length = 2 (invalid)
+    err = assert_raises(RuntimeError) { Ttlv.decode(buf) }
+    assert_match(/Enumeration requires length 4/, err.message)
+  end
+
+  def test_boolean_with_wrong_length_raises
+    buf = "\x00".b * 16
+    buf[0] = 0x42.chr; buf[1] = 0x00.chr; buf[2] = 0x01.chr
+    buf[3] = 0x06.chr # type = Boolean
+    buf[4, 4] = [4].pack("N") # length = 4 (should be 8)
+    err = assert_raises(RuntimeError) { Ttlv.decode(buf) }
+    assert_match(/Boolean requires length 8/, err.message)
+  end
+
+  def test_long_integer_with_wrong_length_raises
+    buf = "\x00".b * 16
+    buf[0] = 0x42.chr; buf[1] = 0x00.chr; buf[2] = 0x01.chr
+    buf[3] = 0x03.chr # type = LongInteger
+    buf[4, 4] = [4].pack("N") # length = 4 (should be 8)
+    err = assert_raises(RuntimeError) { Ttlv.decode(buf) }
+    assert_match(/LongInteger requires length 8/, err.message)
+  end
+
+  def test_datetime_with_wrong_length_raises
+    buf = "\x00".b * 16
+    buf[0] = 0x42.chr; buf[1] = 0x00.chr; buf[2] = 0x01.chr
+    buf[3] = 0x09.chr # type = DateTime
+    buf[4, 4] = [4].pack("N") # length = 4 (should be 8)
+    err = assert_raises(RuntimeError) { Ttlv.decode(buf) }
+    assert_match(/DateTime requires length 8/, err.message)
+  end
+
+  def test_interval_with_wrong_length_raises
+    buf = "\x00".b * 16
+    buf[0] = 0x42.chr; buf[1] = 0x00.chr; buf[2] = 0x01.chr
+    buf[3] = 0x0A.chr # type = Interval
+    buf[4, 4] = [2].pack("N") # length = 2 (should be 4)
+    err = assert_raises(RuntimeError) { Ttlv.decode(buf) }
+    assert_match(/Interval requires length 4/, err.message)
+  end
+
+  # -- UTF-8 validation (C1) --
+
+  def test_invalid_utf8_in_text_string_raises
+    # TextString header: tag=0x420055, type=0x07, length=2
+    header = [0x42, 0x00, 0x55, 0x07].pack("C4") + [2].pack("N")
+    value = "\xFF\xFE".b
+    padding = "\x00" * 6
+    buf = header + value + padding
+    err = assert_raises(RuntimeError) { Ttlv.decode(buf) }
+    assert_match(/invalid UTF-8/, err.message)
+  end
+
+  # -- Negative LongInteger (M1) --
+
+  def test_encode_decode_negative_one_long_integer
+    encoded = Ttlv.encode_long_integer(0x42006A, -1)
+    decoded = Ttlv.decode(encoded)
+    assert_equal(-1, decoded[:value])
+  end
+
+  def test_encode_decode_large_negative_long_integer
+    encoded = Ttlv.encode_long_integer(0x42006A, -2_147_483_648)
+    decoded = Ttlv.decode(encoded)
+    assert_equal(-2_147_483_648, decoded[:value])
+  end
+
+  # -- Structure child overrun --
+
+  def test_structure_child_overrun_raises
+    child = Ttlv.encode_integer(0x420002, 42) # 16 bytes total
+    # Structure with length=8 but child needs 16
+    header = [0x42, 0x00, 0x01, 0x01].pack("C4") + [8].pack("N")
+    buf = header + child
+    assert_raises(RuntimeError) { Ttlv.decode(buf) }
   end
 end

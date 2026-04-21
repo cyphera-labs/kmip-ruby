@@ -212,10 +212,11 @@ module CypheraKmip
     # 5. DeriveKey
     # -------------------------------------------------------------------------
 
-    def build_derive_key_request(unique_id, derivation_data, name, length)
+    def build_derive_key_request(unique_id, derivation_data, name, length, derivation_method: 0x00000004)
       payload = Ttlv.encode_structure(Tag::REQUEST_PAYLOAD, [
         Ttlv.encode_text_string(Tag::UNIQUE_IDENTIFIER, unique_id),
         Ttlv.encode_structure(Tag::DERIVATION_PARAMETERS, [
+          Ttlv.encode_enum(Tag::DERIVATION_METHOD, derivation_method),
           Ttlv.encode_byte_string(Tag::DERIVATION_DATA, derivation_data),
         ]),
         Ttlv.encode_structure(Tag::TEMPLATE_ATTRIBUTE, [
@@ -713,8 +714,15 @@ module CypheraKmip
       }
 
       unless result[:result_status] == ResultStatus::SUCCESS
-        error_msg = result[:result_message] || "KMIP operation failed (status=#{result[:result_status]})"
-        raise error_msg
+        raw_msg = (result[:result_message] || "")
+          .gsub(/[\x00-\x08\x0A-\x1F\x7F]/, "")
+          .slice(0, 256) || ""
+        error_msg = raw_msg.empty? ? "KMIP operation failed (status=#{result[:result_status]})" : raw_msg
+        raise KmipError.new(
+          error_msg,
+          result_status: result[:result_status] || 0,
+          result_reason: result[:result_reason] || 0,
+        )
       end
 
       result

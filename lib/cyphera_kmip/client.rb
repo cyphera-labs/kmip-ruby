@@ -43,7 +43,8 @@ module CypheraKmip
     # @param ca_cert [String, nil] path to CA certificate PEM file
     # @param timeout [Integer] connection timeout in seconds (default 10)
     # @param insecure_skip_verify [Boolean] DANGER: disables server certificate verification (default false)
-    def initialize(host:, client_cert:, client_key:, port: 5696, ca_cert: nil, timeout: 10, insecure_skip_verify: false)
+    # @param server_cert_fingerprint [String, nil] SHA-256 hex fingerprint for certificate pinning
+    def initialize(host:, client_cert:, client_key:, port: 5696, ca_cert: nil, timeout: 10, insecure_skip_verify: false, server_cert_fingerprint: nil)
       @host = host
       @port = port
       @timeout = timeout
@@ -51,13 +52,20 @@ module CypheraKmip
       @client_key = client_key
       @ca_cert = ca_cert
       @insecure_skip_verify = insecure_skip_verify
+      @server_cert_fingerprint = server_cert_fingerprint
       @socket = nil
+      @mutex = Mutex.new
+
+      if @insecure_skip_verify
+        warn "KmipClient: insecure_skip_verify: true disables TLS certificate verification. NEVER use in production."
+      end
     end
 
     # Resolve an algorithm name string to its KMIP enum value.
-    # Returns 0 for unknown algorithms.
+    #
+    # @raise [ArgumentError] for unknown algorithm names.
     def self.resolve_algorithm(name)
-      ALGO_MAP[name.to_s.upcase] || 0
+      ALGO_MAP.fetch(name.to_s.upcase) { raise ArgumentError, "Unknown KMIP algorithm: #{name}" }
     end
 
     # -------------------------------------------------------------------------
@@ -118,8 +126,8 @@ module CypheraKmip
     # 5. DeriveKey -- derive a new key from an existing key.
     # -------------------------------------------------------------------------
 
-    def derive_key(unique_id, derivation_data, name, length)
-      request = Operations.build_derive_key_request(unique_id, derivation_data, name, length)
+    def derive_key(unique_id, derivation_data, name, length, derivation_method: 0x00000004)
+      request = Operations.build_derive_key_request(unique_id, derivation_data, name, length, derivation_method: derivation_method)
       response_data = send_request(request)
       response = Operations.parse_response(response_data)
       Operations.parse_derive_key_payload(response[:payload])
@@ -395,9 +403,11 @@ module CypheraKmip
 
     # Close the TLS connection.
     def close
-      if @socket
-        @socket.close
-        @socket = nil
+      @mutex.synchronize do
+        if @socket
+          @socket.close
+          @socket = nil
+        end
       end
     end
 
@@ -408,7 +418,7 @@ module CypheraKmip
       begin
         socket.write(request)
       rescue IOError, SystemCallError
-        @socket = nil # Mark connection as stale.
+        @mutex.synchronize { @socket = nil }
         raise
       end
 
@@ -416,7 +426,7 @@ module CypheraKmip
       begin
         header = recv_exact(socket, 8)
       rescue IOError, SystemCallError
-        @socket = nil # Mark connection as stale.
+        @mutex.synchronize { @socket = nil }
         raise
       end
 
@@ -424,14 +434,14 @@ module CypheraKmip
 
       # Validate response size before allocating.
       if value_length > MAX_RESPONSE_SIZE
-        @socket = nil # Mark connection as stale.
+        @mutex.synchronize { @socket = nil }
         raise "KMIP: response too large (#{value_length} bytes, max #{MAX_RESPONSE_SIZE})"
       end
 
       begin
         body = recv_exact(socket, value_length)
       rescue IOError, SystemCallError
-        @socket = nil # Mark connection as stale.
+        @mutex.synchronize { @socket = nil }
         raise
       end
 
@@ -441,6 +451,9 @@ module CypheraKmip
     def recv_exact(socket, n)
       data = String.new(encoding: "BINARY")
       while data.bytesize < n
+        unless IO.select([socket], nil, nil, @timeout)
+          raise "KMIP: read timed out after #{@timeout}s"
+        end
         chunk = socket.read(n - data.bytesize)
         raise "KMIP connection closed unexpectedly" if chunk.nil? || chunk.empty?
 
@@ -450,36 +463,64 @@ module CypheraKmip
     end
 
     def connect
-      return @socket if @socket
+      @mutex.synchronize do
+        return @socket if @socket && !@socket.closed?
 
-      tcp = TCPSocket.new(@host, @port)
-      tcp.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
+        # Non-blocking connect with timeout
+        addr = Socket.sockaddr_in(@port, @host)
+        tcp = Socket.new(Socket::AF_INET, Socket::SOCK_STREAM)
+        tcp.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
+        begin
+          tcp.connect_nonblock(addr)
+        rescue IO::WaitWritable
+          unless IO.select(nil, [tcp], nil, @timeout)
+            tcp.close
+            raise "KMIP connection timed out after #{@timeout}s"
+          end
+          begin
+            tcp.connect_nonblock(addr)
+          rescue Errno::EISCONN
+            # Already connected — expected on retry
+          end
+        end
 
-      ctx = OpenSSL::SSL::SSLContext.new
-      ctx.cert = OpenSSL::X509::Certificate.new(File.read(@client_cert))
-      ctx.key = OpenSSL::PKey.read(File.read(@client_key))
+        ctx = OpenSSL::SSL::SSLContext.new
+        ctx.min_version = OpenSSL::SSL::TLS1_2_VERSION
+        ctx.cert = OpenSSL::X509::Certificate.new(File.read(@client_cert))
+        ctx.key = OpenSSL::PKey.read(File.read(@client_key))
 
-      if @ca_cert
-        ctx.ca_file = @ca_cert
-      else
-        # Use system default certificate store when no CA cert is provided.
-        ctx.cert_store = OpenSSL::X509::Store.new
-        ctx.cert_store.set_default_paths
+        if @ca_cert
+          ctx.ca_file = @ca_cert
+        else
+          ctx.cert_store = OpenSSL::X509::Store.new
+          ctx.cert_store.set_default_paths
+        end
+
+        if @insecure_skip_verify
+          ctx.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        else
+          ctx.verify_mode = OpenSSL::SSL::VERIFY_PEER
+        end
+
+        if @server_cert_fingerprint
+          ctx.verify_callback = proc do |preverify_ok, store_ctx|
+            return false unless preverify_ok || @insecure_skip_verify
+
+            cert = store_ctx.current_cert
+            if store_ctx.chain&.first == cert
+              fingerprint = OpenSSL::Digest::SHA256.hexdigest(cert.to_der)
+              return fingerprint.downcase == @server_cert_fingerprint.downcase
+            end
+            true
+          end
+        end
+
+        ssl = OpenSSL::SSL::SSLSocket.new(tcp, ctx)
+        ssl.hostname = @host
+        ssl.connect
+
+        @socket = ssl
       end
-
-      # Always verify peer certificates by default.
-      # Only disable if explicitly opted in via insecure_skip_verify.
-      if @insecure_skip_verify
-        ctx.verify_mode = OpenSSL::SSL::VERIFY_NONE
-      else
-        ctx.verify_mode = OpenSSL::SSL::VERIFY_PEER
-      end
-
-      ssl = OpenSSL::SSL::SSLSocket.new(tcp, ctx)
-      ssl.hostname = @host
-      ssl.connect
-
-      @socket = ssl
     end
   end
 end
