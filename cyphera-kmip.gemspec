@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = "cyphera-kmip"
-  spec.version       = "0.1.0"
+  spec.version       = "0.0.1.alpha1"
   spec.authors       = ["Leslie Gutschow"]
   spec.email         = ["leslie.gutschow@horizondigital.dev"]
   spec.summary       = "KMIP client for Ruby"
